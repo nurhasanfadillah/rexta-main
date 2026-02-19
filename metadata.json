@@ -1,0 +1,7 @@
+{
+  "name": "REXTA",
+  "description": "REXTA (Redone Extended Asset) - Aplikasi manajemen stok mobile-first.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
