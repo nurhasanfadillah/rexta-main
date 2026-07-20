@@ -57,7 +57,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNotify, onPublicAccess
              <p className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Login Akses</p>
              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-500">
                 <ShieldCheck size={12} />
-                <span>Gunakan Akun Supabase</span>
+                <span>Gunakan Akun REXTA</span>
              </div>
           </div>
 
