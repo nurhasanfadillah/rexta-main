@@ -21,16 +21,18 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNotify, onPublicAccess
 
     try {
       const { data, error } = await signIn(email, password);
-      
+
       if (error) throw error;
 
-      if (data.session) {
+      if (data?.session) {
         onNotify('Login berhasil! Selamat datang.', 'success');
         onLogin(true);
+      } else {
+        throw new Error('Login gagal. Periksa email dan password.');
       }
     } catch (err: any) {
       console.error(err);
-      onNotify(err.message || 'Gagal login. Periksa email dan password.', 'error');
+      onNotify(String(err?.message || 'Gagal login. Periksa email dan password.'), 'error');
     } finally {
       setIsLoading(false);
     }

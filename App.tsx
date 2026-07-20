@@ -98,11 +98,15 @@ const App: React.FC = () => {
   // Check Auth and Initial Load
   useEffect(() => {
     const checkSession = async () => {
-      const session = await getCurrentSession();
-      if (session) {
-        setIsLoggedIn(true);
-        loadData();
-      } else {
+      try {
+        const session = await getCurrentSession();
+        if (session) {
+          setIsLoggedIn(true);
+          loadData();
+        } else {
+          setLoading(false);
+        }
+      } catch {
         setLoading(false);
       }
     };
