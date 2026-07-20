@@ -1,4 +1,14 @@
-import { auth } from '../lib/auth';
+import { betterAuth } from 'better-auth';
+import { Pool } from '@neondatabase/serverless';
+
+// Inline auth config — menghindari cross-directory ESM import issue di Vercel
+const auth = betterAuth({
+  database: new Pool({ connectionString: process.env.DATABASE_URL }),
+  emailAndPassword: { enabled: true },
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL,
+  trustedOrigins: [process.env.BETTER_AUTH_URL as string],
+});
 
 export default async function handler(req: any, res: any) {
   try {
@@ -10,12 +20,10 @@ export default async function handler(req: any, res: any) {
     const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string);
     const url = new URL(`/api/auth/${path}`, `${proto}://${host}`);
 
-    // Forward query params selain 'p' dan 'path'
     for (const [k, v] of Object.entries(req.query as Record<string, string>)) {
       if (k !== 'p' && k !== 'path') url.searchParams.set(k, v);
     }
 
-    // Baca body — support dua mode: req.body (Vercel parsed) atau raw stream
     let bodyString: string | undefined;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.body != null) {
@@ -30,7 +38,6 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // Build request headers
     const headers = new Headers();
     for (const [k, v] of Object.entries(req.headers as Record<string, string | string[]>)) {
       if (v != null) headers.set(k, Array.isArray(v) ? v.join(', ') : v);
@@ -49,7 +56,6 @@ export default async function handler(req: any, res: any) {
     const webRes = await auth.handler(webReq);
 
     res.status(webRes.status);
-
     webRes.headers.forEach((v: string, k: string) => {
       if (k.toLowerCase() !== 'set-cookie') res.setHeader(k, v);
     });
@@ -59,7 +65,7 @@ export default async function handler(req: any, res: any) {
 
     res.end(await webRes.text());
   } catch (err: any) {
-    console.error('[auth-proxy] CRASH:', err?.message || String(err), err?.stack);
+    console.error('[auth-proxy] CRASH:', err?.message || String(err));
     if (!res.headersSent) {
       res.status(500).json({ error: 'auth-proxy internal error', detail: err?.message });
     }
