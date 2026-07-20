@@ -26,7 +26,6 @@ import {
   signOut,
   getCurrentSession
 } from './services/database';
-import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabView>('DASHBOARD');
@@ -109,21 +108,6 @@ const App: React.FC = () => {
     };
 
     checkSession();
-
-    // Listen for Auth Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setIsLoggedIn(true);
-        setIsPublicMode(false); // Reset public mode if logged in
-        // Don't reload data here if it's already loading/loaded to prevent loops
-        if (!isLoggedIn) loadData(); 
-      } else {
-        setIsLoggedIn(false);
-        setInventory({ products: [], materials: [], categories: [], transactions: [] });
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   const handleLogin = (status: boolean) => {
