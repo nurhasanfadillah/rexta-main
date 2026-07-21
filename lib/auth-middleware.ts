@@ -1,4 +1,4 @@
-import { auth } from './auth';
+import { auth } from './auth.js';
 
 export async function requireSession(req: any) {
   const session = await auth.api.getSession({ headers: req.headers });

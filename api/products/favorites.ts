@@ -1,5 +1,5 @@
-import { sql } from '../../lib/db';
-import { requireSession } from '../../lib/auth-middleware';
+import { sql } from '../../lib/db.js';
+import { requireSession } from '../../lib/auth-middleware.js';
 
 const mapProductFromDB = (row: any) => ({
   id: row.id,

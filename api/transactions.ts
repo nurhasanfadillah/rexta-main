@@ -1,5 +1,5 @@
-import { db } from '../lib/db';
-import { requireSession } from '../lib/auth-middleware';
+import { db } from '../lib/db.js';
+import { requireSession } from '../lib/auth-middleware.js';
 
 const mapTransactionFromDB = (row: any) => ({
   id: row.id,
