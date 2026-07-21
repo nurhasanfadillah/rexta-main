@@ -1,13 +1,15 @@
 import { db } from '../lib/db.js';
+import { materials } from '../lib/schema.js';
+import { eq, ilike, asc, count } from 'drizzle-orm';
 import { requireSession } from '../lib/auth-middleware.js';
 
-const mapMaterialFromDB = (row: any) => ({
+const mapMaterial = (row: typeof materials.$inferSelect) => ({
   id: row.id,
   name: row.name,
   unit: row.unit,
   price: Number(row.price) || 0,
   stock: Number(row.stock) || 0,
-  updatedAt: row.updated_at,
+  updatedAt: row.updatedAt,
 });
 
 export default async function handler(req: any, res: any) {
@@ -24,29 +26,14 @@ export default async function handler(req: any, res: any) {
       const search = req.query.search || '';
       const offset = (page - 1) * limit;
 
-      const conditions: string[] = [];
-      const params: any[] = [];
-      let idx = 1;
+      const where = search ? ilike(materials.name, `%${search}%`) : undefined;
 
-      if (search) {
-        params.push(`%${search}%`);
-        conditions.push(`name ILIKE $${idx++}`);
-      }
-
-      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-      const [countResult, dataResult] = await Promise.all([
-        db.query(`SELECT COUNT(*) as total FROM materials ${where}`, params),
-        db.query(
-          `SELECT * FROM materials ${where} ORDER BY name ASC LIMIT $${idx} OFFSET $${idx + 1}`,
-          [...params, limit, offset]
-        ),
+      const [[{ value: total }], data] = await Promise.all([
+        db.select({ value: count() }).from(materials).where(where),
+        db.select().from(materials).where(where).orderBy(asc(materials.name)).limit(limit).offset(offset),
       ]);
 
-      return res.json({
-        data: dataResult.rows.map(mapMaterialFromDB),
-        count: parseInt(countResult.rows[0].total),
-      });
+      return res.json({ data: data.map(mapMaterial), count: Number(total) });
     } catch (error) {
       console.error('[materials] GET error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -56,12 +43,14 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'POST') {
     try {
       const { id, name, unit, price, stock } = req.body;
-      const result = await db.query(
-        `INSERT INTO materials (id, name, unit, price, stock, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-        [id, name, unit, price || 0, stock || 0]
-      );
-      return res.json(mapMaterialFromDB(result.rows[0]));
+      const [row] = await db.insert(materials).values({
+        id,
+        name,
+        unit,
+        price: String(price || 0),
+        stock: String(stock || 0),
+      }).returning();
+      return res.json(mapMaterial(row));
     } catch (error) {
       console.error('[materials] POST error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -72,13 +61,15 @@ export default async function handler(req: any, res: any) {
     try {
       const { id } = req.query;
       const { name, unit, price, stock } = req.body;
-      const result = await db.query(
-        `UPDATE materials SET name=$1, unit=$2, price=$3, stock=$4, updated_at=NOW()
-         WHERE id=$5 RETURNING *`,
-        [name, unit, price || 0, stock || 0, id]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ error: 'Material not found' });
-      return res.json(mapMaterialFromDB(result.rows[0]));
+      const [row] = await db.update(materials).set({
+        name,
+        unit,
+        price: String(price || 0),
+        stock: String(stock || 0),
+        updatedAt: new Date(),
+      }).where(eq(materials.id, id as string)).returning();
+      if (!row) return res.status(404).json({ error: 'Material not found' });
+      return res.json(mapMaterial(row));
     } catch (error) {
       console.error('[materials] PUT error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -88,7 +79,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
-      await db.query(`DELETE FROM materials WHERE id = $1`, [id]);
+      await db.delete(materials).where(eq(materials.id, id as string));
       return res.json({ success: true });
     } catch (error) {
       console.error('[materials] DELETE error:', error);

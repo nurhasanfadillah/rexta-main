@@ -1,15 +1,17 @@
-import { sql } from '../../lib/db.js';
+import { db } from '../../lib/db.js';
+import { products } from '../../lib/schema.js';
+import { eq, asc } from 'drizzle-orm';
 import { requireSession } from '../../lib/auth-middleware.js';
 
-const mapProductFromDB = (row: any) => ({
+const mapProduct = (row: typeof products.$inferSelect) => ({
   id: row.id,
   name: row.name,
-  categoryId: row.category_id,
-  priceCMT: Number(row.price_cmt) || 0,
+  categoryId: row.categoryId,
+  priceCMT: Number(row.priceCmt) || 0,
   hpp: Number(row.hpp) || 0,
   stock: Number(row.stock) || 0,
-  updatedAt: row.updated_at,
-  isFavorite: row.is_favorite || false,
+  updatedAt: row.updatedAt,
+  isFavorite: row.isFavorite ?? false,
 });
 
 export default async function handler(req: any, res: any) {
@@ -24,8 +26,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const rows = await sql`SELECT * FROM products WHERE is_favorite = true ORDER BY name ASC`;
-    return res.json(rows.map(mapProductFromDB));
+    const rows = await db.select().from(products)
+      .where(eq(products.isFavorite, true)).orderBy(asc(products.name));
+    return res.json(rows.map(mapProduct));
   } catch (error) {
     console.error('[products/favorites] GET error:', error);
     return res.status(500).json({ error: 'Internal Server Error' });

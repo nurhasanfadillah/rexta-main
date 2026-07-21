@@ -1,10 +1,13 @@
-import { sql } from '../lib/db.js';
+import { db } from '../lib/db.js';
+import { categories } from '../lib/schema.js';
+import { eq, asc } from 'drizzle-orm';
 import { requireSession } from '../lib/auth-middleware.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method === 'GET') {
     try {
-      const rows = await sql`SELECT id, name FROM categories ORDER BY name ASC`;
+      const rows = await db.select({ id: categories.id, name: categories.name })
+        .from(categories).orderBy(asc(categories.name));
       return res.json(rows);
     } catch (error) {
       console.error('[categories] GET error:', error);
@@ -21,8 +24,8 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'POST') {
     try {
       const { id, name } = req.body;
-      const rows = await sql`INSERT INTO categories (id, name) VALUES (${id}, ${name}) RETURNING *`;
-      return res.json(rows[0]);
+      const [row] = await db.insert(categories).values({ id, name }).returning();
+      return res.json(row);
     } catch (error) {
       console.error('[categories] POST error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -32,7 +35,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
-      await sql`DELETE FROM categories WHERE id = ${id}`;
+      await db.delete(categories).where(eq(categories.id, id as string));
       return res.json({ success: true });
     } catch (error) {
       console.error('[categories] DELETE error:', error);

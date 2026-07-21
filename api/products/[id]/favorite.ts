@@ -1,4 +1,6 @@
 import { db } from '../../../lib/db.js';
+import { products } from '../../../lib/schema.js';
+import { eq } from 'drizzle-orm';
 import { requireSession } from '../../../lib/auth-middleware.js';
 
 export default async function handler(req: any, res: any) {
@@ -15,11 +17,11 @@ export default async function handler(req: any, res: any) {
   try {
     const { id } = req.query;
     const { isFavorite } = req.body;
-    const result = await db.query(
-      `UPDATE products SET is_favorite = $1 WHERE id = $2`,
-      [isFavorite, id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Product not found' });
+    const result = await db.update(products)
+      .set({ isFavorite })
+      .where(eq(products.id, id as string))
+      .returning({ id: products.id });
+    if (result.length === 0) return res.status(404).json({ error: 'Product not found' });
     return res.json({ success: true });
   } catch (error) {
     console.error('[products/[id]/favorite] PATCH error:', error);

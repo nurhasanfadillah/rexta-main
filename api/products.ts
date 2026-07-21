@@ -1,15 +1,17 @@
 import { db } from '../lib/db.js';
+import { products } from '../lib/schema.js';
+import { eq, ilike, and, asc, count } from 'drizzle-orm';
 import { requireSession } from '../lib/auth-middleware.js';
 
-const mapProductFromDB = (row: any) => ({
+const mapProduct = (row: typeof products.$inferSelect) => ({
   id: row.id,
   name: row.name,
-  categoryId: row.category_id,
-  priceCMT: Number(row.price_cmt) || 0,
+  categoryId: row.categoryId,
+  priceCMT: Number(row.priceCmt) || 0,
   hpp: Number(row.hpp) || 0,
   stock: Number(row.stock) || 0,
-  updatedAt: row.updated_at,
-  isFavorite: row.is_favorite || false,
+  updatedAt: row.updatedAt,
+  isFavorite: row.isFavorite ?? false,
 });
 
 export default async function handler(req: any, res: any) {
@@ -28,36 +30,18 @@ export default async function handler(req: any, res: any) {
       const onlyFavorites = req.query.onlyFavorites === 'true';
       const offset = (page - 1) * limit;
 
-      const conditions: string[] = [];
-      const params: any[] = [];
-      let idx = 1;
+      const conditions = [];
+      if (search) conditions.push(ilike(products.name, `%${search}%`));
+      if (categoryId && categoryId !== 'SEMUA') conditions.push(eq(products.categoryId, categoryId as string));
+      if (onlyFavorites) conditions.push(eq(products.isFavorite, true));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-      if (search) {
-        params.push(`%${search}%`);
-        conditions.push(`name ILIKE $${idx++}`);
-      }
-      if (categoryId && categoryId !== 'SEMUA') {
-        params.push(categoryId);
-        conditions.push(`category_id = $${idx++}`);
-      }
-      if (onlyFavorites) {
-        conditions.push(`is_favorite = true`);
-      }
-
-      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-      const [countResult, dataResult] = await Promise.all([
-        db.query(`SELECT COUNT(*) as total FROM products ${where}`, params),
-        db.query(
-          `SELECT * FROM products ${where} ORDER BY name ASC LIMIT $${idx} OFFSET $${idx + 1}`,
-          [...params, limit, offset]
-        ),
+      const [[{ value: total }], data] = await Promise.all([
+        db.select({ value: count() }).from(products).where(where),
+        db.select().from(products).where(where).orderBy(asc(products.name)).limit(limit).offset(offset),
       ]);
 
-      return res.json({
-        data: dataResult.rows.map(mapProductFromDB),
-        count: parseInt(countResult.rows[0].total),
-      });
+      return res.json({ data: data.map(mapProduct), count: Number(total) });
     } catch (error) {
       console.error('[products] GET error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -67,12 +51,16 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'POST') {
     try {
       const { id, name, category_id, price_cmt, hpp, stock, is_favorite } = req.body;
-      const result = await db.query(
-        `INSERT INTO products (id, name, category_id, price_cmt, hpp, stock, is_favorite, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING *`,
-        [id, name, category_id, price_cmt || 0, hpp || 0, stock || 0, is_favorite || false]
-      );
-      return res.json(mapProductFromDB(result.rows[0]));
+      const [row] = await db.insert(products).values({
+        id,
+        name,
+        categoryId: category_id || null,
+        priceCmt: String(price_cmt || 0),
+        hpp: String(hpp || 0),
+        stock: String(stock || 0),
+        isFavorite: is_favorite || false,
+      }).returning();
+      return res.json(mapProduct(row));
     } catch (error) {
       console.error('[products] POST error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -83,13 +71,17 @@ export default async function handler(req: any, res: any) {
     try {
       const { id } = req.query;
       const { name, category_id, price_cmt, hpp, stock, is_favorite } = req.body;
-      const result = await db.query(
-        `UPDATE products SET name=$1, category_id=$2, price_cmt=$3, hpp=$4, stock=$5, is_favorite=$6, updated_at=NOW()
-         WHERE id=$7 RETURNING *`,
-        [name, category_id, price_cmt || 0, hpp || 0, stock || 0, is_favorite || false, id]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ error: 'Product not found' });
-      return res.json(mapProductFromDB(result.rows[0]));
+      const [row] = await db.update(products).set({
+        name,
+        categoryId: category_id || null,
+        priceCmt: String(price_cmt || 0),
+        hpp: String(hpp || 0),
+        stock: String(stock || 0),
+        isFavorite: is_favorite || false,
+        updatedAt: new Date(),
+      }).where(eq(products.id, id as string)).returning();
+      if (!row) return res.status(404).json({ error: 'Product not found' });
+      return res.json(mapProduct(row));
     } catch (error) {
       console.error('[products] PUT error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -99,7 +91,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
-      await db.query(`DELETE FROM products WHERE id = $1`, [id]);
+      await db.delete(products).where(eq(products.id, id as string));
       return res.json({ success: true });
     } catch (error) {
       console.error('[products] DELETE error:', error);

@@ -1,15 +1,17 @@
 import { db } from '../lib/db.js';
+import { transactions, products, materials } from '../lib/schema.js';
+import { eq, gte, lte, and, desc, count } from 'drizzle-orm';
 import { requireSession } from '../lib/auth-middleware.js';
 
-const mapTransactionFromDB = (row: any) => ({
+const mapTransaction = (row: typeof transactions.$inferSelect) => ({
   id: row.id,
-  itemId: row.item_id,
-  itemType: row.item_type,
+  itemId: row.itemId,
+  itemType: row.itemType,
   type: row.type,
   qty: Number(row.qty),
   date: row.date,
   notes: row.notes || null,
-  balanceAfter: Number(row.balance_after),
+  balanceAfter: Number(row.balanceAfter),
 });
 
 export default async function handler(req: any, res: any) {
@@ -26,41 +28,19 @@ export default async function handler(req: any, res: any) {
       const { itemId, itemType, dateFrom, dateTo } = req.query;
       const offset = (page - 1) * limit;
 
-      const conditions: string[] = [];
-      const params: any[] = [];
-      let idx = 1;
+      const conditions = [];
+      if (itemId) conditions.push(eq(transactions.itemId, itemId as string));
+      if (itemType) conditions.push(eq(transactions.itemType, itemType as string));
+      if (dateFrom) conditions.push(gte(transactions.date, new Date(dateFrom as string)));
+      if (dateTo) conditions.push(lte(transactions.date, new Date(dateTo as string)));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-      if (itemId) {
-        params.push(itemId);
-        conditions.push(`item_id = $${idx++}`);
-      }
-      if (itemType) {
-        params.push(itemType);
-        conditions.push(`item_type = $${idx++}`);
-      }
-      if (dateFrom) {
-        params.push(dateFrom);
-        conditions.push(`date >= $${idx++}`);
-      }
-      if (dateTo) {
-        params.push(dateTo);
-        conditions.push(`date <= $${idx++}`);
-      }
-
-      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-      const [countResult, dataResult] = await Promise.all([
-        db.query(`SELECT COUNT(*) as total FROM transactions ${where}`, params),
-        db.query(
-          `SELECT * FROM transactions ${where} ORDER BY date DESC LIMIT $${idx} OFFSET $${idx + 1}`,
-          [...params, limit, offset]
-        ),
+      const [[{ value: total }], data] = await Promise.all([
+        db.select({ value: count() }).from(transactions).where(where),
+        db.select().from(transactions).where(where).orderBy(desc(transactions.date)).limit(limit).offset(offset),
       ]);
 
-      return res.json({
-        data: dataResult.rows.map(mapTransactionFromDB),
-        count: parseInt(countResult.rows[0].total),
-      });
+      return res.json({ data: data.map(mapTransaction), count: Number(total) });
     } catch (error) {
       console.error('[transactions] GET error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
@@ -71,23 +51,59 @@ export default async function handler(req: any, res: any) {
     try {
       const { id, item_id, item_type, type, qty, date, notes, manual_stock } = req.body;
 
-      const rpcResult = await db.query(
-        `SELECT process_inventory_transaction($1,$2,$3,$4,$5,$6,$7,$8) as new_stock`,
-        [id, item_id, item_type, type, qty, date, notes || null, manual_stock ?? null]
-      );
+      const result = await db.transaction(async (tx) => {
+        let currentStock: string;
 
-      const newStock = Number(rpcResult.rows[0].new_stock);
+        if (item_type === 'product') {
+          const [item] = await tx.select({ stock: products.stock })
+            .from(products).where(eq(products.id, item_id));
+          if (!item) throw new Error('ITEM_NOT_FOUND');
+          currentStock = item.stock || '0';
+        } else {
+          const [item] = await tx.select({ stock: materials.stock })
+            .from(materials).where(eq(materials.id, item_id));
+          if (!item) throw new Error('ITEM_NOT_FOUND');
+          currentStock = item.stock || '0';
+        }
 
-      const txResult = await db.query(
-        `SELECT * FROM transactions WHERE id = $1`,
-        [id]
-      );
+        const current = Number(currentStock);
+        const newStock =
+          type === 'OPNAME' ? Number(manual_stock) :
+          type === 'IN'     ? current + Number(qty) :
+                              current - Number(qty);
+
+        if (item_type === 'product') {
+          await tx.update(products)
+            .set({ stock: String(newStock), updatedAt: new Date() })
+            .where(eq(products.id, item_id));
+        } else {
+          await tx.update(materials)
+            .set({ stock: String(newStock), updatedAt: new Date() })
+            .where(eq(materials.id, item_id));
+        }
+
+        const [txRecord] = await tx.insert(transactions).values({
+          id,
+          itemId: item_id,
+          itemType: item_type,
+          type,
+          qty: String(qty),
+          date: new Date(date),
+          notes: notes || null,
+          balanceAfter: String(newStock),
+        }).returning();
+
+        return { transaction: txRecord, newStock };
+      });
 
       return res.json({
-        transaction: mapTransactionFromDB(txResult.rows[0]),
-        newStock,
+        transaction: mapTransaction(result.transaction),
+        newStock: result.newStock,
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.message === 'ITEM_NOT_FOUND') {
+        return res.status(404).json({ error: 'Item not found' });
+      }
       console.error('[transactions] POST error:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
     }

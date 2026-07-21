@@ -1,4 +1,6 @@
-import { db, sql } from '../../lib/db.js';
+import { db } from '../../lib/db.js';
+import { products, categories } from '../../lib/schema.js';
+import { ilike, asc, count } from 'drizzle-orm';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {
@@ -11,35 +13,24 @@ export default async function handler(req: any, res: any) {
     const search = req.query.search || '';
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let idx = 1;
+    const where = search ? ilike(products.name, `%${search}%`) : undefined;
 
-    if (search) {
-      params.push(`%${search}%`);
-      conditions.push(`name ILIKE $${idx++}`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const [countResult, dataResult, categories] = await Promise.all([
-      db.query(`SELECT COUNT(*) as total FROM products ${where}`, params),
-      db.query(
-        `SELECT id, name, stock, category_id FROM products ${where} ORDER BY name ASC LIMIT $${idx} OFFSET $${idx + 1}`,
-        [...params, limit, offset]
-      ),
-      sql`SELECT id, name FROM categories ORDER BY name ASC`,
+    const [[{ value: total }], data, cats] = await Promise.all([
+      db.select({ value: count() }).from(products).where(where),
+      db.select({ id: products.id, name: products.name, stock: products.stock, categoryId: products.categoryId })
+        .from(products).where(where).orderBy(asc(products.name)).limit(limit).offset(offset),
+      db.select({ id: categories.id, name: categories.name }).from(categories).orderBy(asc(categories.name)),
     ]);
 
     return res.json({
-      data: dataResult.rows.map((row: any) => ({
+      data: data.map(row => ({
         id: row.id,
         name: row.name,
         stock: Number(row.stock) || 0,
-        categoryId: row.category_id,
+        categoryId: row.categoryId,
       })),
-      categories,
-      count: parseInt(countResult.rows[0].total),
+      categories: cats,
+      count: Number(total),
     });
   } catch (error) {
     console.error('[products/public] GET error:', error);
