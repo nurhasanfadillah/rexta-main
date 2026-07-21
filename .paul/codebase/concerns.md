@@ -2,173 +2,206 @@
 
 ## 🔴 HIGH — Security
 
-### 1. Hardcoded Supabase Credentials
-**File**: `services/supabaseClient.ts` (lines 8, 12)  
-**Issue**: Supabase URL dan JWT anon key hardcoded sebagai fallback values di source code yang ter-commit ke git.
+### 1. GEMINI_API_KEY Exposed ke Client Bundle
+**File**: `vite.config.ts` (lines 14-15)
 
 ```typescript
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wrggkbacornocdgamwkj.supabase.co';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGci...FULL_JWT...';
+define: {
+  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+}
 ```
 
-**Impact**: Siapapun yang punya akses repo bisa akses Supabase dengan anonymous privileges.  
-**Fix**: Hapus hardcoded fallback, wajibkan env vars, tambahkan validation.
+**Impact**: API key ter-embed di bundle JavaScript production — siapapun bisa steal key dari browser.  
+**Fix**: Hapus dari `vite.config.ts`. Gemini belum diimplementasi jadi tidak ada yang rusak jika dihapus.
 
 ---
 
-### 2. Gemini API Key Exposed ke Client
-**File**: `vite.config.ts` (lines 14-15)  
-**Issue**: `GEMINI_API_KEY` di-inject ke client bundle via Vite `define`:
+### 2. Hardcoded Seed Passwords di Git
+**Files**: 
+- `scripts/create-admin.mjs` (line 6: `Admin123!`)
+- `scripts/seed-user.mjs` (line 6: `admin123`)
+
+**Impact**: Default credentials yang mudah ditebak hardcoded di repository.  
+**Fix**: Gunakan prompt interaktif atau env vars untuk password saat seeding.
+
+---
+
+### 3. Input Validation Tidak Ada di API Endpoints
+**Files**: Semua file di `api/` — products, materials, categories, transactions
+
+**Impact**: 
+- POST `/api/products` — tidak ada validasi bahwa `name`, `categoryId` ada atau valid
+- POST `/api/transactions` — tidak ada validasi bahwa `qty` adalah angka positif
+- Bisa menyebabkan DB constraint violations dengan error messages yang tidak clean
+- Data korup (nama kosong, stok negatif) bisa tersimpan
+
+---
+
+## 🔴 HIGH — Architecture
+
+### 4. Multiple Pool Instances — Connection Exhaustion Risk
+**Files**: `lib/db.ts` (max 10), `lib/auth.ts` (Pool), `api/auth-proxy.ts` (Pool inline)
+
+**Impact**: ~25-30 koneksi per cold start. NeonDB free tier limit 100 connections. Under load, bisa exhaustion.  
+**Fix**: Single exported Pool di `lib/db.ts`, re-import di `lib/auth.ts` dan `api/auth-proxy.ts`.
+
+---
+
+### 5. Missing apiToggleProductFavorite Request Body
+**File**: `services/database.ts` (line ~210)
 
 ```typescript
-define: { 'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY) }
+// Bug: _isFavorite parameter tidak dikirim ke API
+export const apiToggleProductFavorite = async (id: string, _isFavorite: boolean) => {
+  await apiFetch(`/api/products/${id}/favorite`, { method: 'PATCH' });
+  // Missing: body: JSON.stringify({ isFavorite: _isFavorite })
+};
 ```
 
-**Impact**: API key terlihat jelas di bundle JavaScript production → theft dan abuse.  
-**Fix**: Gemini harus dipanggil dari server-side (atau tidak perlu karena geminiService.ts kosong).
+**Impact**: `api/products/[id]/favorite.ts` expects `isFavorite` di request body tapi tidak pernah dikirim.
 
 ---
 
-### 3. Tidak Ada Input Validation
-**Files**: `components/MasterDataView.tsx`, `components/StockManageView.tsx`  
-**Issue**: Input dari form (nama, qty, harga) langsung dikirim ke API tanpa validasi.  
-**Impact**: Stok negatif, nama kosong, angka negatif bisa tersimpan ke database.  
-**Fix**: Validasi di handler sebelum API call.
+## 🟠 HIGH — Auth System (Phase 03 Active)
+
+### 6. Duplicate Auth Config (auth-proxy.ts vs lib/auth.ts)
+**Files**: `api/auth-proxy.ts` (lines 7-18), `lib/auth.ts`
+
+**Issue**: `auth-proxy.ts` buat inline betterAuth config sendiri, duplikat dari `lib/auth.ts`. Ditambahkan sebagai workaround untuk Vercel ESM resolution issue (`ERR_MODULE_NOT_FOUND`).
+
+**Status**: Phase 03 Plan 03-02 sedang address ini. ESM `.js` extension fix di `472997c` seharusnya memungkinkan consolidation.
 
 ---
 
-## 🔴 HIGH — Missing Infrastructure
+### 7. Tidak Ada Error Boundary
+**File**: `App.tsx`
 
-### 4. Tidak Ada Error Boundary
-**Issue**: Tidak ada `ErrorBoundary` component di App.tsx atau di mana pun.  
-**Impact**: Unhandled React error (misal: null dereference di render) crash seluruh aplikasi → blank white screen.  
-**Fix**: Wrap App dengan ErrorBoundary sederhana.
-
----
-
-### 5. Tidak Ada Tests
-**Issue**: Zero test coverage. Lihat `testing.md` untuk detail.  
-**Impact**: Tidak ada safety net saat refactor atau bug fix.
+**Impact**: Jika ada child component throw saat render (null dereference, dll.) → blank white screen untuk user.  
+**Fix**: Wrap `<App>` dengan `ErrorBoundary` class component sederhana.
 
 ---
 
 ## 🟡 MEDIUM — Code Quality
 
-### 6. File Terlalu Besar
+### 8. Pervasive `any` Type (40+ occurrences)
+**Files**: Semua API handlers (`req: any, res: any`), `App.tsx`, semua komponen besar
+
+```typescript
+// API handlers
+export default async function handler(req: any, res: any) { ... }
+
+// Catch blocks
+} catch (err: any) { onNotify(err.message || '...', 'error'); }
+
+// Transformation functions
+const mapProductFromDB = (row: any) => ({ ... })
+```
+
+**Impact**: Kehilangan type safety, IDE autocomplete tidak optimal, bug runtime sulit terdeteksi.
+
+---
+
+### 9. File Terlalu Besar
+
 | File | LOC |
 |------|-----|
 | `components/StockManageView.tsx` | 596 |
 | `components/MasterDataView.tsx` | 592 |
-| `App.tsx` | 440 |
-| `services/database.ts` | 426 |
+| `App.tsx` | ~429 |
+| `services/database.ts` | ~319 |
 | `components/Layout.tsx` | 264 |
 | `components/DashboardView.tsx` | 261 |
 
-**Fix**: Pecah menjadi komponen dan hooks yang lebih kecil.
+**Fix**: Extract ke custom hooks dan sub-components.
 
 ---
 
-### 7. Pervasive `any` Type (40+ occurrences)
-**Files**: `services/database.ts`, `App.tsx`, semua komponen besar  
+### 10. Debouncing Tidak Konsisten (Manual setTimeout di 3 Tempat)
+**Files**: `PublicStockView.tsx`, `StockManageView.tsx`, `StockOpnameView.tsx`
 
-```typescript
-// Contoh dari database.ts
-const logError = (context: string, error: any) => { ... }
-const mapProductFromDB = (data: any): Product => { ... }
-
-// Dari App.tsx (setiap catch block)
-} catch (err: any) { ... }
-```
-
-**Impact**: Kehilangan type safety, IDE autocomplete tidak optimal, bug runtime sulit terdeteksi.  
-**Fix**: Ganti `any` dengan tipe spesifik, tambah `PostgrestError` type dari Supabase SDK.
-
----
-
-### 8. ID Generation Lemah
-**File**: `App.tsx` (lines 65, 253, 280, 331)  
-
-```typescript
-const id = Date.now().toString() + Math.random().toString();
-const id = 'CAT-${Date.now()}-${Math.floor(Math.random() * 1000)}';
-```
-
-**Impact**: Collision-prone, tidak cryptographically secure.  
-**Fix**: Gunakan `crypto.randomUUID()` (built-in browser API) atau Supabase auto-generated UUID.
-
----
-
-### 9. Console Statements di Production
-**Files**: 12+ lokasi (App.tsx, database.ts, Layout.tsx, LoginView.tsx, dll.)  
-
-```typescript
-console.error(`[DB Error] ${context}:`, msg);  // database.ts
-console.log('Service Worker registered');       // Layout.tsx
-console.error(err);                             // LoginView.tsx
-```
-
-**Fix**: Gunakan logger library (atau hapus debug logs) untuk production build.
-
----
-
-## 🟡 MEDIUM — Architecture
-
-### 10. Prop Drilling dalam di App.tsx
-**Issue**: App.tsx meneruskan puluhan props dan handlers ke Layout → View components.  
-**Impact**: Sulit menambah fitur baru, setiap perubahan interface mempengaruhi banyak file.  
-**Fix**: Pertimbangkan React Context atau Zustand untuk state yang sering diakses.
-
----
-
-### 11. Tailwind via CDN (bukan npm)
-**File**: `index.html`  
-**Issue**: Tailwind diload dari `cdn.tailwindcss.com` — tidak bisa tree-shake, dependent internet untuk initial load, bundle lebih besar.  
-**Fix**: Install Tailwind via npm + PostCSS untuk production build yang optimal.
-
----
-
-### 12. Debouncing Tidak Konsisten
-**Files**: `PublicStockView.tsx`, `StockManageView.tsx`, `StockOpnameView.tsx`  
-**Issue**: Implementasi debounce 500ms dengan `setTimeout` diulang di 3 tempat.  
+Implementasi manual `setTimeout` diulang di 3 komponen.  
 **Fix**: Extract ke custom hook `useDebounce`.
+
+---
+
+### 11. Console Statements di Production Code
+**Files**: 12+ lokasi (App.tsx, database.ts, Layout.tsx, api/ handlers)
+
+```typescript
+console.error('[products] GET error:', error);  // api/products.ts
+console.log('Service Worker registered');       // Layout.tsx
+```
+
+**Fix**: Remove debug logs atau gunakan conditional logging (dev only).
+
+---
+
+## 🟡 MEDIUM — API Design
+
+### 12. HTTP Status Codes Tidak Sesuai Standar
+- `POST` create → mengembalikan 200 (seharusnya 201 Created)
+- `DELETE` → mengembalikan 200 `{success: true}` (seharusnya 204 No Content)
+- Validation errors → langsung 500 (seharusnya 400 Bad Request)
 
 ---
 
 ## 🟢 LOW — Dead Code
 
 ### 13. File Deprecated Masih Ada di Repo
+
 | File | Status |
 |------|--------|
-| `components/AiAssistantView.tsx` | File isi hanya komentar: "FILE INI SUDAH DIHAPUS" |
-| `services/geminiService.ts` | File isi hanya komentar (kosong) |
-| `services/storageService.ts` | File isi hanya migration note (kosong) |
+| `services/supabaseClient.ts` | Stub kosong — migration note saja |
+| `services/geminiService.ts` | Stub kosong |
+| `services/storageService.ts` | Stub kosong |
+| `db_schema.sql` | Legacy Supabase schema (sudah ada `db_schema_neon.sql`) |
 
-**Fix**: Hapus ketiga file ini.
+**Fix**: Hapus file-file ini.
 
 ---
 
-### 14. Browser API Tanpa Feature Detection
-**File**: `components/QrScannerModal.tsx` (lines 52, 83)  
+### 14. Deprecated Env Vars di .env.example
+
+```
+VITE_SUPABASE_URL=     # Deprecated
+VITE_SUPABASE_ANON_KEY=  # Deprecated
+```
+
+**Fix**: Hapus dari `.env.example` agar tidak membingungkan.
+
+---
+
+### 15. navigator.vibrate() Tanpa Feature Detection
+**File**: `components/QrScannerModal.tsx`
 
 ```typescript
-navigator.vibrate(200); // Tidak ada check 'vibrate' in navigator
+navigator.vibrate(200);  // Crash di desktop/browser yang tidak support
 ```
 
 **Fix**: `if ('vibrate' in navigator) navigator.vibrate(200);`
 
 ---
 
+### 16. Tidak Ada Lazy Loading untuk Views
+**File**: `App.tsx`
+
+Semua view components diimport dan dirender upfront. Bundle size bisa dikurangi dengan `React.lazy()` + Suspense.
+
+---
+
 ## Priority Fix Order
 
-| # | Issue | Effort | Impact |
-|---|-------|--------|--------|
-| 1 | Hapus hardcoded Supabase credentials | Low | High |
-| 2 | Hapus Gemini key dari client bundle | Low | High |
-| 3 | Tambah Error Boundary | Low | High |
-| 4 | Validasi input form | Medium | High |
-| 5 | Ganti `any` dengan proper types | Medium | Medium |
-| 6 | Ganti ID generation ke crypto.randomUUID() | Low | Medium |
-| 7 | Hapus file deprecated | Low | Low |
-| 8 | Install Tailwind via npm | Medium | Medium |
-| 9 | Tambah tests (mulai dari database.ts) | High | High |
-| 10 | Pecah file besar | High | Medium |
+| # | Issue | Effort | Impact | Phase |
+|---|-------|--------|--------|-------|
+| 1 | Fix duplicate Pool instances | Low | High | Now |
+| 2 | Fix apiToggleProductFavorite missing body | Low | High | Now |
+| 3 | Hapus GEMINI_API_KEY dari vite.config.ts | Low | High | Now |
+| 4 | Resolve duplicate auth config (auth-proxy vs lib/auth) | Medium | High | Phase 03 |
+| 5 | Tambah Error Boundary | Low | High | Next |
+| 6 | Tambah input validation di API endpoints | Medium | High | Next |
+| 7 | Hapus hardcoded seed passwords | Low | Medium | Next |
+| 8 | Ganti `any` dengan proper types | Medium | Medium | Later |
+| 9 | Hapus file deprecated (supabaseClient, geminiService, storageService) | Low | Low | Later |
+| 10 | Extract debounce ke useDebounce hook | Low | Low | Later |
+| 11 | Add lazy loading untuk views | Medium | Low | Later |

@@ -1,68 +1,76 @@
 # External Integrations
 
-## Supabase (Primary Backend)
+## NeonDB (Primary Database)
 
-**Version**: 2.39.3  
-**File**: `services/supabaseClient.ts`, `services/database.ts`
-
-### Config
+**Client**: `@neondatabase/serverless` 1.1.0  
+**File**: `lib/db.ts`
 
 ```typescript
-// services/supabaseClient.ts
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wrggkbacornocdgamwkj.supabase.co';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGci...'; // ⚠️ HARDCODED
+// Pool untuk Better Auth + CRUD queries
+export const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 10000,
+});
+
+// HTTP adapter untuk queries stateless (categories GET)
+export const sql = neon(process.env.DATABASE_URL!);
 ```
 
-> **SECURITY**: Credentials hardcoded sebagai fallback. Lihat `concerns.md`.
-
-### Database Tables
-
-| Table | Purpose |
-|-------|---------|
-| `categories` | Kategori produk |
-| `products` | Inventaris produk dengan stok, harga |
-| `materials` | Bahan baku dengan stok dan harga |
-| `transactions` | Riwayat transaksi IN/OUT/OPNAME |
-| `auth.users` | Managed oleh Supabase Auth |
-
-### Features Used
-
-- **Supabase Auth**: Email/password login via `signIn()`, `signOut()`, `getCurrentSession()`
-- **Row Level Security (RLS)**: Aktif pada semua tabel
-- **RPC**: `process_inventory_transaction` — atomic stock update + transaction record
-- **Realtime**: Tidak digunakan
-- **Storage**: Tidak digunakan (ada `storageService.ts` yang deprecated)
-
-### Schema Files
-
-- `db_schema.sql` — definisi tabel dan index
-- `db_config.sql` — konfigurasi awal database
+**Tables**: `categories`, `products`, `materials`, `transactions`  
+**Schema**: `db_schema_neon.sql`  
+**Env**: `DATABASE_URL=postgresql://...?sslmode=require`
 
 ---
 
-## Supabase Auth
+## Better Auth (Authentication)
 
-**Method**: Email/password  
-**Session**: Managed otomatis oleh Supabase SDK  
-**No OAuth**: Tidak ada Google/GitHub login  
+**Version**: 1.6.23  
+**Files**: `lib/auth.ts`, `lib/auth-middleware.ts`, `api/auth-proxy.ts`, `services/database.ts`
 
+### Server Config (`lib/auth.ts`)
 ```typescript
-// services/database.ts
-export const signIn = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  ...
-};
+export const auth = betterAuth({
+  database: Pool (NeonDB),
+  emailAndPassword: { enabled: true },
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL,
+  trustedOrigins: [process.env.BETTER_AUTH_URL],
+});
 ```
+
+### Client Config (`services/database.ts`)
+```typescript
+const authClient = createAuthClient({ baseURL: window.location.origin });
+export const signIn = (email, password) => authClient.signIn.email({ email, password });
+export const signOut = () => authClient.signOut();
+export const getCurrentSession = () => authClient.getSession();
+```
+
+### Auth Flow
+- Login → `POST /api/auth/sign-in/email` → rewritten ke `/api/auth-proxy?p=sign-in/email`
+- Session disimpan sebagai httpOnly cookie
+- Setiap API request proteksi via `requireSession(req)` di `lib/auth-middleware.ts`
+
+**Auth Tables**: `user`, `session`, `account`, `verification` (di NeonDB)  
+**Env**: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
 
 ---
 
-## Google Gemini AI (Placeholder)
+## Vercel (Deployment)
 
-**Status**: BELUM DIIMPLEMENTASI  
-**File**: `services/geminiService.ts` (file kosong, hanya komentar)  
-**Config**: `GEMINI_API_KEY` di `vite.config.ts` (exposed ke client — security risk)
+**Project ID**: `prj_jwobHvlhwhVP4SxfvzyJS3Yaffai`  
+**File**: `vercel.json`, `.vercel/project.json`
 
-Planned tapi tidak ada implementasi aktual. `AiAssistantView.tsx` juga deprecated.
+```json
+{
+  "rewrites": [
+    { "source": "/api/auth/:path*", "destination": "/api/auth-proxy?p=:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
+```
 
 ---
 
@@ -70,7 +78,7 @@ Planned tapi tidak ada implementasi aktual. `AiAssistantView.tsx` juga deprecate
 
 **Libraries**: `jspdf` 2.5.1 + `jspdf-autotable` 3.8.2  
 **File**: `components/ReportsView.tsx`  
-**Usage**: Export laporan transaksi ke PDF dengan tabel
+**Usage**: Export laporan transaksi ke PDF dengan tabel formatted
 
 ---
 
@@ -80,54 +88,71 @@ Planned tapi tidak ada implementasi aktual. `AiAssistantView.tsx` juga deprecate
 **Library**: `jsqr` 1.4.0  
 **File**: `components/QrScannerModal.tsx`  
 **Usage**: Scan QR code via kamera device → auto-fill produk di form transaksi  
-**Performance note** (line 48): "PERFORMANCE FIX: Hanya scan setiap 500ms agar HP tidak panas/lag"
+**Performance**: Scan throttled setiap 500ms agar device tidak panas
 
 ### Generator (qrcode)
 **Library**: `qrcode` 1.5.3  
 **File**: `components/QrLabelModal.tsx`  
-**Usage**: Generate QR label untuk produk/material, bisa di-print
+**Usage**: Generate QR label untuk produk/material, printable
+
+---
+
+## PWA — Service Worker
+
+**File**: `sw.js` (v7)  
+**Registration**: `components/Layout.tsx`
+
+Cache strategies:
+- **`rexta-app-v7`**: Pre-cache critical shell (`/, /index.html, /manifest.json`)
+- **`rexta-runtime-v7`**: Cache-first untuk CDN (Tailwind, esm.sh, fonts)
+- **`rexta-images-v7`**: Stale-while-revalidate untuk gambar CDN
+- **API calls**: Network only (tidak di-cache)
+
+**Manifest** (`manifest.json`):
+- `name`: "REXTA Inventory Management"
+- `short_name`: "REXTA"
+- `display`: standalone
+- `theme_color`: #020617
 
 ---
 
 ## Tailwind CSS (CDN)
 
 **Source**: `https://cdn.tailwindcss.com`  
-**Config**: Inline di `index.html` (lines 27-66)  
+**Config**: Inline di `index.html` (tidak di-install via npm)
 
 Custom theme colors:
 ```javascript
-primary: '#0891b2'    // Cyan 600
-success: '#10b981'    // Emerald 500
-danger: '#f43f5e'     // Rose 500
-warning: '#f59e0b'    // Amber 500
+primary: '#0891b2'      // Cyan 600
+success: '#10b981'      // Emerald 500
+danger: '#f43f5e'       // Rose 500
+warning: '#f59e0b'      // Amber 500
 darkSurface: '#020617'
 darkCard: '#0f172a'
 ```
-
-> **Note**: Menggunakan CDN (bukan npm install) artinya tidak bisa tree-shake, dan ada dependency ke internet untuk load CSS.
 
 ---
 
 ## Google Fonts
 
 **Source**: `https://fonts.googleapis.com`  
-**Font**: Inter (weights 400, 500, 600, 700)  
-**Usage**: Font utama seluruh aplikasi  
+**Font**: Inter (weights 300–700)  
+**Usage**: Font utama seluruh aplikasi
 
 ---
 
 ## Flaticon CDN
 
 **Source**: `https://cdn-icons-png.flaticon.com`  
-**Usage**: App icon untuk PWA (`manifest.json`)
+**Usage**: App icon untuk PWA manifest (192x192, 512x512)
 
 ---
 
 ## Lucide React
 
 **Version**: 0.562.0  
-**Usage**: Semua icon di UI (sidebar, buttons, modals)  
-**Installation**: npm package (tidak via CDN)
+**Usage**: Semua icon di UI (sidebar, buttons, modals, notifications)  
+**Install**: npm package
 
 ---
 
@@ -135,23 +160,23 @@ darkCard: '#0f172a'
 
 | API | Used In | Usage |
 |-----|---------|-------|
-| `MediaDevices.getUserMedia` | QrScannerModal.tsx | Akses kamera untuk scan QR |
-| `navigator.vibrate()` | QrScannerModal.tsx (L52, L83) | Haptic feedback saat scan berhasil |
-| `localStorage` | Layout.tsx, App.tsx | Simpan preferensi dark mode (`rexta_theme`) |
-| `ServiceWorker` | Layout.tsx | Registrasi SW untuk PWA |
-| `Canvas API` | QrScannerModal.tsx | Process frame kamera untuk jsQR |
+| `MediaDevices.getUserMedia` | `QrScannerModal.tsx` | Akses kamera untuk scan QR |
+| `navigator.vibrate()` | `QrScannerModal.tsx` | Haptic feedback saat scan berhasil |
+| `localStorage` | `Layout.tsx` | Simpan preferensi dark mode (`rexta_theme`) |
+| `ServiceWorker` | `Layout.tsx` | Registrasi SW untuk PWA |
+| `Canvas API` | `QrScannerModal.tsx` | Process frame kamera untuk jsQR |
 
 > **Issue**: `navigator.vibrate()` dipanggil tanpa feature detection (`'vibrate' in navigator`).
 
 ---
 
-## Service Worker
+## Deprecated Integrations
 
-**File**: `sw.js` (v7)  
-**Registration**: `components/Layout.tsx`  
+| Integration | Status | Replaced By |
+|-------------|--------|-------------|
+| Supabase Auth | REMOVED | Better Auth 1.6.23 |
+| Supabase PostgreSQL | REMOVED | NeonDB + @neondatabase/serverless |
+| Netlify | REMOVED | Vercel Edge Functions |
+| Google Gemini AI | NEVER IMPLEMENTED | N/A (placeholder saja) |
 
-Cache strategies:
-- Navigation requests → Network first, fallback ke cache
-- CDN assets (Tailwind, Lucide) → Cache first (performance)
-- Image requests → Stale while revalidate
-- API calls ke Supabase → Network only (tidak di-cache)
+File sisa (stubs kosong): `services/supabaseClient.ts`, `services/geminiService.ts`, `services/storageService.ts`

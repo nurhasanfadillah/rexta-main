@@ -1,9 +1,9 @@
 # Data Models
 
-**Source**: `types.ts` — semua TypeScript types  
-**Database schema**: `db_schema.sql` — PostgreSQL tables
+**Source TypeScript types**: `types.ts`  
+**Database schema**: `db_schema_neon.sql`
 
-## Core Types
+## Core Domain Types
 
 ### Product
 
@@ -11,16 +11,25 @@
 export interface Product {
   id: string;
   name: string;
-  categoryId: string;    // FK ke Category
-  priceCMT: number;      // Harga jual (price per unit CMT?)
-  hpp: number;           // Harga Pokok Penjualan
+  categoryId: string;     // FK ke Category
+  priceCMT: number;       // Harga jual per unit
+  hpp: number;            // Harga Pokok Penjualan
   stock: number;
-  updatedAt?: string;    // ISO datetime dari Supabase
-  isFavorite?: boolean;  // Produk favorit di dashboard
+  updatedAt?: string;     // ISO datetime
+  isFavorite?: boolean;   // Produk favorit di dashboard
 }
 ```
 
-DB mapping: `categoryId` ↔ `category_id`, `priceCMT` ↔ `price_cmt`, `isFavorite` ↔ `is_favorite`
+DB mapping:
+
+| TypeScript | PostgreSQL |
+|-----------|------------|
+| `categoryId` | `category_id` |
+| `priceCMT` | `price_cmt` |
+| `isFavorite` | `is_favorite` |
+| `updatedAt` | `updated_at` |
+
+---
 
 ### Material
 
@@ -28,12 +37,14 @@ DB mapping: `categoryId` ↔ `category_id`, `priceCMT` ↔ `price_cmt`, `isFavor
 export interface Material {
   id: string;
   name: string;
-  unit: string;      // Satuan: kg, liter, pcs, dll.
-  price: number;     // Harga per unit
+  unit: string;     // Satuan: kg, liter, pcs, dll.
+  price: number;    // Harga per unit
   stock: number;
   updatedAt?: string;
 }
 ```
+
+---
 
 ### Category
 
@@ -43,6 +54,8 @@ export interface Category {
   name: string;
 }
 ```
+
+---
 
 ### Transaction
 
@@ -59,7 +72,15 @@ export interface Transaction {
 }
 ```
 
-DB mapping: `itemId` ↔ `item_id`, `itemType` ↔ `item_type`, `balanceAfter` ↔ `balance_after`
+DB mapping:
+
+| TypeScript | PostgreSQL |
+|-----------|------------|
+| `itemId` | `item_id` |
+| `itemType` | `item_type` |
+| `balanceAfter` | `balance_after` |
+
+---
 
 ### InventoryData (Aggregate State)
 
@@ -72,23 +93,27 @@ export interface InventoryData {
 }
 ```
 
-Ini adalah root state object yang di-hold di `App.tsx`.
+Root state object di `App.tsx`. Diisi saat app load via `fetchAllData()`.
 
-## Enums & Unions
+---
+
+## Enums & Union Types
 
 ```typescript
-// Item type enum
+// Item type — tentukan apakah transaksi untuk produk atau bahan baku
 export enum ItemType {
   PRODUCT = 'PRODUK',
   MATERIAL = 'BAHAN_BAKU'
 }
 
-// Transaction direction
+// Arah transaksi stok
 export type TransactionType = 'IN' | 'OUT' | 'OPNAME';
 
-// Active tab routing
+// Tab routing aktif di App.tsx
 export type TabView = 'DASHBOARD' | 'MASTER' | 'STOCK' | 'OPNAME' | 'REPORT';
 ```
+
+---
 
 ## UI Types
 
@@ -101,46 +126,92 @@ export interface NotificationItem {
 }
 ```
 
+---
+
+## Better Auth Tables (di NeonDB)
+
+| Table | Key Columns |
+|-------|-------------|
+| `user` | id, name, email (UNIQUE), emailVerified, createdAt, updatedAt |
+| `session` | id, token (UNIQUE), expiresAt, userId (FK) |
+| `account` | id, userId (FK), password (bcrypt hashed), providerId |
+| `verification` | id, identifier, value, expiresAt |
+
+---
+
 ## Entity Relationships
 
 ```
 Category (1) ──── (N) Product
                          │
-                         └── (N) Transaction (itemType: PRODUK)
+                         └──── (N) Transaction [itemType: PRODUK]
 
-Material (1) ──────────────── (N) Transaction (itemType: BAHAN_BAKU)
+Material (1) ─────────────── (N) Transaction [itemType: BAHAN_BAKU]
+
+user (1) ──── (N) session [Better Auth]
+user (1) ──── (1) account [password + providerId]
 ```
 
-## camelCase ↔ snake_case Mapping
+---
 
-Supabase menggunakan `snake_case`, TypeScript menggunakan `camelCase`. Konversi dilakukan di `services/database.ts`:
+## Database Schema Highlights
 
-| TypeScript | PostgreSQL |
-|-----------|------------|
-| `categoryId` | `category_id` |
-| `priceCMT` | `price_cmt` |
-| `isFavorite` | `is_favorite` |
-| `updatedAt` | `updated_at` |
-| `itemId` | `item_id` |
-| `itemType` | `item_type` |
-| `balanceAfter` | `balance_after` |
+```sql
+-- Atomic transaction RPC
+CREATE OR REPLACE FUNCTION process_inventory_transaction(
+  p_id TEXT, p_item_id TEXT, p_item_type TEXT, p_type TEXT,
+  p_qty NUMERIC, p_date TEXT, p_notes TEXT, p_manual_stock NUMERIC
+) RETURNS NUMERIC AS $$
+-- IN:  new_stock = current + qty
+-- OUT: new_stock = current - qty  
+-- OPNAME: new_stock = manual_stock (override)
+-- Atomic: UPDATE products/materials + INSERT transactions
+$$ LANGUAGE plpgsql;
 
-## Database Operations
+-- Indexes
+CREATE INDEX idx_transactions_item_id ON transactions(item_id);
+CREATE INDEX idx_transactions_date ON transactions(date DESC);
+CREATE INDEX idx_products_name ON products(name);
+CREATE INDEX idx_materials_name ON materials(name);
+CREATE INDEX idx_products_favorite ON products(is_favorite);
+```
 
-Key Supabase operations di `services/database.ts`:
+---
 
-| Function | Operation |
-|---------|-----------|
-| `fetchAllData()` | Load semua data awal |
-| `getProductsPaginated(page, limit, search)` | Paginated products |
-| `getMaterialsPaginated(page, limit, search)` | Paginated materials |
-| `getDashboardSummary()` | Aggregate stats (aset total) |
-| `getFavoriteProducts()` | Filter `is_favorite: true` |
-| `apiAddProduct(product)` | INSERT products |
-| `apiUpdateProduct(id, product)` | UPDATE products |
-| `apiDeleteProduct(id)` | DELETE products |
-| `apiAddTransactionAndUpdateStock(...)` | RPC: atomic transaction + stock update |
-| `signIn(email, password)` | Supabase auth |
-| `signOut()` | Supabase auth |
+## API Response Shapes
 
-Atomic transaction menggunakan Supabase RPC: `process_inventory_transaction` — stored procedure yang update stok dan insert transaction dalam satu database transaction.
+```typescript
+// Paginated list
+{ data: T[], count: number }
+
+// Single item create/update
+{ data: T }
+
+// Transaction (returns new stock)
+{ transaction: Transaction, newStock: number }
+
+// Error
+{ error: string }
+```
+
+---
+
+## Data Transformation
+
+Dilakukan di `api/*.ts` via `mapXFromDB()` functions:
+
+```typescript
+// DB row (snake_case) → TypeScript (camelCase)
+const mapProductFromDB = (row: any): Product => ({
+  id: row.id,
+  name: row.name,
+  categoryId: row.category_id,
+  priceCMT: Number(row.price_cmt) || 0,
+  hpp: Number(row.hpp) || 0,
+  stock: Number(row.stock) || 0,
+  updatedAt: row.updated_at,
+  isFavorite: row.is_favorite || false,
+});
+```
+
+Numeric values di-cast via `Number()` karena PostgreSQL mengembalikan strings untuk NUMERIC columns via node-postgres.

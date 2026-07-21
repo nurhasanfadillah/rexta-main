@@ -1,92 +1,115 @@
 # Technology Stack
 
-## Core
+## Summary Table
 
-| Layer | Technology | Version | Notes |
-|-------|-----------|---------|-------|
-| UI Framework | React | 19.2.3 | Latest, functional components only |
-| Build Tool | Vite | 6.2.0 | Dev server port 3000 |
-| Language | TypeScript | ~5.8.2 | ES2022 target, strict off |
-| Styling | Tailwind CSS | CDN | Config inline di `index.html`, dark mode `class` |
+| Layer | Technology | Version | File |
+|-------|-----------|---------|------|
+| UI Framework | React | 19.2.3 | `package.json` |
+| Build Tool | Vite | 6.2.0 | `vite.config.ts` |
+| Language | TypeScript | 5.8.2 | `tsconfig.json` |
+| Database | NeonDB (PostgreSQL) | — | `lib/db.ts` |
+| DB Client | @neondatabase/serverless | 1.1.0 | `package.json` |
+| Auth | Better Auth | 1.6.23 | `lib/auth.ts`, `api/auth-proxy.ts` |
+| Styling | Tailwind CSS (CDN) | v4 | `index.html` (inline config) |
+| Icons | lucide-react | 0.562.0 | `package.json` |
+| PDF Export | jsPDF + jspdf-autotable | 2.5.1 + 3.8.2 | `components/ReportsView.tsx` |
+| QR Generate | qrcode | 1.5.3 | `components/QrLabelModal.tsx` |
+| QR Scan | jsqr | 1.4.0 | `components/QrScannerModal.tsx` |
+| Deployment | Vercel Edge Functions | — | `vercel.json`, `api/` |
+| PWA | Service Worker | v7 | `sw.js`, `manifest.json` |
 
-## Backend & Data
+## Frontend
 
-| Layer | Technology | Version | Notes |
-|-------|-----------|---------|-------|
-| Backend-as-a-Service | Supabase | 2.39.3 | PostgreSQL + Auth + RPC |
-| Auth | Supabase Auth | — | Email/password, session via SDK |
-| Database | PostgreSQL | (Supabase managed) | RLS enabled, schema di `db_schema.sql` |
-| ORM | None | — | Direct Supabase SDK queries |
+### React 19.2.3
+- Uses `createRoot()` API (React 19 concurrent)
+- Entry: `index.tsx` → mounts ke `#root`
+- Semua komponen: functional dengan hooks (useState, useEffect, useCallback)
+- **No React Router** — tab routing via `useState<TabView>` di `App.tsx`
+- **No Context API, Redux, Zustand** — state diteruskan lewat props
 
-## UI Libraries
+### Vite 6.2.0
+- Config: `vite.config.ts`
+- Dev server: `http://0.0.0.0:3000`
+- Path alias: `@` → root directory (`.`)
+- Build output: `dist/`
+- Module type: `"module"` (ESM) di `package.json`
 
-| Library | Version | Usage |
-|---------|---------|-------|
-| lucide-react | 0.562.0 | Semua icon di UI |
-| jspdf | 2.5.1 | Export laporan ke PDF |
-| jspdf-autotable | 3.8.2 | Tabel dalam PDF |
-| jsqr | 1.4.0 | QR code scanning dari kamera |
-| qrcode | 1.5.3 | Generate QR label |
+### TypeScript 5.8.2
+- Target: ES2022, module: ESNext
+- `strict: false` (strict mode OFF)
+- `noEmit: true` (hanya type-check, build via Vite)
+- Path alias `@/*` → `./`
+- `allowImportingTsExtensions: true`
 
-## External CDN Dependencies
+### Tailwind CSS (CDN)
+- Dimuat via `<script src="https://cdn.tailwindcss.com">` di `index.html`
+- Inline config di `index.html` (lines 27–66): custom colors, dark mode via `class`
+- Custom theme: primary cyan (#0891b2), danger rose, success emerald, warning amber
+- **Tidak diinstall via npm** — CDN only, tidak ada tree-shaking
 
-| Resource | Source | Usage |
-|---------|--------|-------|
-| Tailwind CSS | cdn.tailwindcss.com | Styling framework |
-| Google Fonts (Inter) | fonts.googleapis.com | Font utama |
-| App icon | cdn-icons-png.flaticon.com | PWA icon |
+## Backend
 
-## PWA
+### NeonDB (@neondatabase/serverless 1.1.0)
+- File: `lib/db.ts`
+- **2 adapter terpisah**:
+  1. `db` — `Pool` (max 10, connectionTimeout 5s) — untuk CRUD queries + Better Auth
+  2. `sql` — `neon()` HTTP adapter — untuk queries stateless (categories GET)
+- Env var: `DATABASE_URL`
+- ⚠️ Multiple Pool instances: `lib/db.ts`, `lib/auth.ts`, dan `api/auth-proxy.ts` masing-masing buat Pool sendiri
 
-| File | Purpose |
-|------|---------|
-| `manifest.json` | PWA manifest (standalone, landscape) |
-| `sw.js` | Service Worker v7, 3 cache strategies |
+### Better Auth 1.6.23
+- File server config: `lib/auth.ts`
+- File middleware: `lib/auth-middleware.ts`
+- File proxy handler: `api/auth-proxy.ts`
+- Mode: email/password saja (tidak ada OAuth/social login)
+- Auth tables di NeonDB: `user`, `session`, `account`, `verification`
+- Env vars: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `DATABASE_URL`
 
-Cache strategy:
-- Critical cache `rexta-app-v7`: pre-cached HTML, manifest
-- Runtime cache `rexta-runtime-v7`: CDN libraries (cache-first)
-- Image cache `rexta-images-v7`: gambar CDN
+### Vercel Edge Functions
+- Semua file di `api/` di-deploy sebagai serverless functions
+- Routing via `vercel.json`:
+  - `/api/auth/*` → `/api/auth-proxy?p=:path*`
+  - `/((?!api/).*)`→ `/index.html` (SPA fallback)
+- Vercel project: `prj_jwobHvlhwhVP4SxfvzyJS3Yaffai`
 
-## Tooling
+## Scripts
 
-| Tool | Status | Config File |
-|------|--------|-------------|
-| ESLint | NOT configured | — |
-| Prettier | NOT configured | — |
-| Biome | NOT configured | — |
-| Testing (Jest/Vitest) | NOT configured | — |
-| CI/CD (GitHub Actions) | NOT configured | — |
-| Docker | NOT configured | — |
-
-## Deployment
-
-- Target: Netlify (ada `_redirects` file)
-- Package manager: npm (tidak ada lock file di repo)
-- Build: `npm run build` → Vite outputs `dist/`
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `npm run dev` | `vite` | Dev server |
+| `npm run build` | `vite build` | Production build |
+| `npm run preview` | `vite preview` | Preview build |
+| `npm run seed:admin` | `node --env-file=.env scripts/create-admin.mjs` | Buat admin user |
 
 ## Environment Variables
 
-| Variable | Usage | Current State |
-|---------|-------|---------------|
-| `VITE_SUPABASE_URL` | Supabase URL | Hardcoded fallback di `services/supabaseClient.ts` |
-| `VITE_SUPABASE_ANON_KEY` | Supabase key | Hardcoded fallback di `services/supabaseClient.ts` |
-| `GEMINI_API_KEY` | Gemini AI | Exposed ke client via `vite.config.ts` define |
+| Var | Used By | Status |
+|-----|---------|--------|
+| `DATABASE_URL` | `lib/db.ts`, `lib/auth.ts` | Required |
+| `BETTER_AUTH_SECRET` | `lib/auth.ts` | Required |
+| `BETTER_AUTH_URL` | `lib/auth.ts` | Required |
+| `GEMINI_API_KEY` | `vite.config.ts` (exposed to client bundle!) | ⚠️ Security risk |
+| `VITE_SUPABASE_URL` | — | Deprecated |
+| `VITE_SUPABASE_ANON_KEY` | — | Deprecated |
 
-> **SECURITY ISSUE**: Credentials Supabase hardcoded di source code. Lihat `concerns.md`.
+## Tooling Status
 
-## TypeScript Config (`tsconfig.json`)
+| Tool | Status |
+|------|--------|
+| ESLint | NOT configured |
+| Prettier | NOT configured |
+| Testing (Vitest/Jest) | NOT configured |
+| CI/CD (GitHub Actions) | NOT configured |
 
-```json
-{
-  "target": "ES2022",
-  "module": "ESNext",
-  "allowJs": true,
-  "skipLibCheck": true,
-  "isolatedModules": true,
-  "noEmit": true,
-  "paths": { "@/*": ["./*"] }
-}
-```
+## CDN Dependencies (Runtime)
 
-Strict mode: OFF. Path alias `@/` tersedia tapi jarang digunakan (kebanyakan relative imports).
+| CDN | URL | Purpose |
+|-----|-----|---------|
+| Tailwind CSS | cdn.tailwindcss.com | Styling |
+| Google Fonts | fonts.googleapis.com | Inter font |
+| Flaticon | cdn-icons-png.flaticon.com | App icons (PWA) |
+| esm.sh | esm.sh | Browser-based module imports |
+
+## Deprecated (Removed)
+- **Supabase** (`@supabase/supabase-js`) — Fully replaced oleh NeonDB + Better Auth di Phase 02
+- File sisa (stubs kosong): `services/supabaseClient.ts`, `services/geminiService.ts`, `services/storageService.ts`
