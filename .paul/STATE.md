@@ -3,9 +3,9 @@
 ## Current Position
 
 Phase: 03-auth-fix — Planning
-Plan: 03-01 created, awaiting approval
+Plan: 03-02 created, awaiting approval
 Status: PLAN created, ready for APPLY
-Last activity: 2026-07-20 — Created .paul/phases/03-auth-fix/03-01-PLAN.md
+Last activity: 2026-07-22 — Created .paul/phases/03-auth-fix/03-02-PLAN.md
 
 Progress:
 - Phase 02: [██████████] 100% COMPLETE
@@ -16,15 +16,15 @@ Progress:
 Current loop state:
 ```
 PLAN ──▶ APPLY ──▶ UNIFY
-  ✓        ✓        ○     [Tasks complete, awaiting human verify checkpoint]
+  ✓        ○        ○     [Plan created, awaiting approval]
 ```
 
 ## Session Continuity
 
-Last session: 2026-07-20
-Stopped at: Plan 03-01 created
-Next action: Review plan, then run /paul:apply .paul/phases/03-auth-fix/03-01-PLAN.md
-Resume file: .paul/phases/03-auth-fix/03-01-PLAN.md
+Last session: 2026-07-22
+Stopped at: Plan 03-02 created
+Next action: Review plan, then run /paul:apply .paul/phases/03-auth-fix/03-02-PLAN.md
+Resume file: .paul/phases/03-auth-fix/03-02-PLAN.md
 
 ## Decisions
 
@@ -40,10 +40,11 @@ Resume file: .paul/phases/03-auth-fix/03-01-PLAN.md
 | GET /categories public | Tidak perlu auth untuk GET categories | Public stock view butuh daftar categories |
 | Body snake_case (POST/PUT products) | Konsisten dengan DB schema | Hindari double mapping di API layer |
 | Auth proxy handler | auth.handler (fetch-based) bukan toNodeHandler | Vercel auto-parse body ke req.body, stream sudah kosong ketika toNodeHandler coba baca |
+| Discovery 2026-07-22 | toNodeHandler BENAR + bodyParser:false adalah solusi | ESM import issue (bukan toNodeHandler) yang bikin 3e8145e gagal — plan 03-02 gabungkan keduanya |
 
 ## Phase Plan
 
 | Phase | Judul | Status |
 |-------|-------|--------|
 | 02-neondb-migration | NeonDB + Better Auth Migration | COMPLETE |
-| 03-auth-fix | Fix Login System | Planning |
+| 03-auth-fix | Fix Login System | Discovery complete |
