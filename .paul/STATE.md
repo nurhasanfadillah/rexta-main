@@ -2,29 +2,30 @@
 
 ## Current Position
 
-Phase: 04-drizzle-rebuild — Discussion complete, ready for planning
-Status: CONTEXT.md created, awaiting /paul:plan
-Last activity: 2026-07-22 — Phase 03 superseded, Phase 04 context written
+Phase: 04-drizzle-rebuild — Planning
+Plan: 04-01 created, awaiting approval
+Status: PLAN created, ready for APPLY
+Last activity: 2026-07-22 — Created .paul/phases/04-drizzle-rebuild/04-01-PLAN.md
 
 Progress:
 - Phase 02: [██████████] 100% COMPLETE
 - Phase 03: [✗✗✗✗✗✗✗✗✗✗] ABANDONED (superseded by Phase 04)
-- Phase 04: [░░░░░░░░░░] 0%
+- Phase 04: [░░░░░░░░░░] 0% (Plan 04-01 of 4 ready)
 
 ## Loop Position
 
 Current loop state:
 ```
-DISCUSS ──▶ PLAN ──▶ APPLY ──▶ UNIFY
-   ✓          ○        ○        ○     [Context ready, awaiting plan]
+PLAN ──▶ APPLY ──▶ UNIFY
+  ✓        ○        ○     [Plan 04-01 created, awaiting approval]
 ```
 
 ## Session Continuity
 
 Last session: 2026-07-22
-Stopped at: Phase 04 CONTEXT.md created
-Next action: Run /paul:plan to create Phase 04 plan
-Resume file: .paul/phases/04-drizzle-rebuild/CONTEXT.md
+Stopped at: Plan 04-01 created
+Next action: Review plan, then run /paul:apply .paul/phases/04-drizzle-rebuild/04-01-PLAN.md
+Resume file: .paul/phases/04-drizzle-rebuild/04-01-PLAN.md
 
 ## Decisions
 
