@@ -24,7 +24,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNotify, onPublicAccess
 
       if (error) throw error;
 
-      if (data?.session) {
+      if (data) {
         onNotify('Login berhasil! Selamat datang.', 'success');
         onLogin(true);
       } else {
