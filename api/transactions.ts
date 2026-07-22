@@ -54,7 +54,7 @@ export default async function handler(req: any, res: any) {
       const result = await db.transaction(async (tx) => {
         let currentStock: string;
 
-        if (item_type === 'product') {
+        if (item_type === 'PRODUK') {
           const [item] = await tx.select({ stock: products.stock })
             .from(products).where(eq(products.id, item_id));
           if (!item) throw new Error('ITEM_NOT_FOUND');
@@ -72,7 +72,7 @@ export default async function handler(req: any, res: any) {
           type === 'IN'     ? current + Number(qty) :
                               current - Number(qty);
 
-        if (item_type === 'product') {
+        if (item_type === 'PRODUK') {
           await tx.update(products)
             .set({ stock: String(newStock), updatedAt: new Date() })
             .where(eq(products.id, item_id));
